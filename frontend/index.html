@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Caselink</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="search-view" class="view search-view" aria-labelledby="app-title">
+        <div class="topbar">
+          <strong>Caselink</strong>
+          <span>대법원 판례 탐색 보조</span>
+        </div>
+
+        <div class="search-hero">
+          <p class="eyebrow">사건 문진 기반 판례 검색</p>
+          <h1 id="app-title">상황을 말하면, 필요한 사실을 먼저 정리합니다.</h1>
+          <p class="hero-copy">
+            법률 용어를 몰라도 괜찮습니다. 사건을 일반어로 입력하면 필요한 정보를 추가 질문으로 채운 뒤 관련 판례를 찾습니다.
+          </p>
+
+          <form id="search-form" class="search-form">
+            <label for="query">사건 설명 또는 조문/사건번호</label>
+            <div class="search-line">
+              <input
+                id="query"
+                name="query"
+                autocomplete="off"
+                placeholder="예: 집주인이 계약갱신 거절을 늦게 통지했어요"
+                value="집주인이 계약갱신 거절을 늦게 통지했어요"
+              />
+              <button type="submit">시작</button>
+            </div>
+          </form>
+
+          <div class="examples" aria-label="예시 입력">
+            <button type="button" data-query="집주인이 계약갱신 거절을 늦게 통지했어요">갱신거절 통지</button>
+            <button type="button" data-query="보증금을 못 돌려받고 있는데 전입신고와 확정일자는 했어요">보증금 반환</button>
+            <button type="button" data-query="2025다210305">2025다210305</button>
+          </div>
+        </div>
+
+        <p class="notice">
+          본 서비스의 요약 및 비교 설명은 학습 보조 목적의 참고 정보입니다. 실제 법률 판단을 대체하지 않으며,
+          반드시 공식 판례 원문을 직접 확인해야 합니다.
+        </p>
+      </section>
+
+      <section id="intake-view" class="view intake-view hidden" aria-labelledby="intake-title">
+        <header class="page-header">
+          <button type="button" class="ghost-button" data-action="back-search">새 입력</button>
+          <div>
+            <p class="eyebrow">사건 정보 확인</p>
+            <h2 id="intake-title">판례 검색 전에 필요한 사실을 확인합니다.</h2>
+          </div>
+        </header>
+
+        <section class="summary-strip">
+          <div>
+            <span class="meta-label">사건 유형</span>
+            <strong id="intake-domain">확인 중</strong>
+          </div>
+          <div>
+            <span class="meta-label">부족한 정보</span>
+            <div id="missing-fields" class="tag-list"></div>
+          </div>
+        </section>
+
+        <section class="base-case intake-panel">
+          <div class="section-title">
+            <p class="eyebrow">추가 질문</p>
+            <h3>아래 질문에 답하면 검색 정확도가 올라갑니다.</h3>
+          </div>
+          <div id="question-list" class="question-list"></div>
+          <form id="answer-form" class="answer-form">
+            <label for="answer">답변</label>
+            <textarea id="answer" rows="5" placeholder="아는 범위에서 편하게 답변해 주세요."></textarea>
+            <div class="card-actions">
+              <button type="submit">답변 반영</button>
+              <button type="button" class="ghost-button" data-action="search-anyway">이대로 검색</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <section id="results-view" class="view results-view hidden" aria-labelledby="results-title">
+        <header class="page-header">
+          <button type="button" class="ghost-button" data-action="back-search">새 검색</button>
+          <div>
+            <p class="eyebrow">검색 결과</p>
+            <h2 id="results-title">관련 판례 후보</h2>
+          </div>
+        </header>
+
+        <section class="summary-strip">
+          <div>
+            <span class="meta-label">입력 유형</span>
+            <strong id="detected-type">auto</strong>
+          </div>
+          <div>
+            <span class="meta-label">관련 조문</span>
+            <div id="related-statutes" class="tag-list"></div>
+          </div>
+        </section>
+
+        <section id="base-case" class="base-case"></section>
+        <section id="results" class="result-grid"></section>
+      </section>
+
+      <section id="compare-view" class="view compare-view hidden" aria-labelledby="compare-title">
+        <header class="page-header">
+          <button type="button" class="ghost-button" data-action="back-results">결과로 돌아가기</button>
+          <div>
+            <p class="eyebrow">판례 비교</p>
+            <h2 id="compare-title">기준 판례와 비교 판례</h2>
+          </div>
+        </header>
+
+        <section id="compare-board" class="compare-board"></section>
+        <section id="compare-summary" class="compare-summary"></section>
+      </section>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
