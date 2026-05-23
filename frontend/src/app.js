@@ -30,6 +30,18 @@ const resultsEl = document.querySelector("#results");
 const compareBoardEl = document.querySelector("#compare-board");
 const compareSummaryEl = document.querySelector("#compare-summary");
 
+const queryTypeLabels = {
+  statute: "조문",
+  case_no: "사건번호",
+  natural: "자연어",
+};
+
+const groupLabels = {
+  statute_related: "관련 조문 판례",
+  fact_similar: "사실관계 유사 판례",
+  different_decision_point: "판단 사유가 다른 판례",
+};
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   await startIntake(queryInput.value);
@@ -54,10 +66,10 @@ document.querySelectorAll("[data-query]").forEach((button) => {
 document.querySelectorAll("[data-action='back-search']").forEach((button) => {
   button.addEventListener("click", () => showView("search"));
 });
+
 document.querySelector("[data-action='back-results']").addEventListener("click", () => showView("results"));
 document.querySelector("[data-action='search-anyway']").addEventListener("click", async () => {
-  const query = buildFallbackSearchQuery();
-  await runSearch(query);
+  await runSearch(buildFallbackSearchQuery());
 });
 
 async function startIntake(query) {
@@ -89,7 +101,7 @@ async function runIntake() {
     renderIntake(response);
     showView("intake");
   } catch (error) {
-    renderError("문진 처리 중 오류가 발생했습니다. 백엔드와 Gemini API 키를 확인해 주세요.", error);
+    renderError("문진 처리 중 오류가 발생했습니다. 백엔드와 Gemini API 설정을 확인해주세요.", error);
     showView("intake");
   }
 }
@@ -107,7 +119,7 @@ async function runSearch(query) {
     renderResults(response);
     showView("results");
   } catch (error) {
-    resultsEl.innerHTML = renderErrorCard("검색 중 오류가 발생했습니다. 백엔드 서버 상태를 확인해 주세요.", error);
+    resultsEl.innerHTML = renderErrorCard("검색 중 오류가 발생했습니다. 백엔드 서버 상태를 확인해주세요.", error);
     showView("results");
   }
 }
@@ -123,10 +135,10 @@ function renderIntake(intake) {
 }
 
 function renderResults(response) {
-  detectedTypeEl.textContent = response.detected_query_type;
+  detectedTypeEl.textContent = queryTypeLabels[response.detected_query_type] || response.detected_query_type;
   statutesEl.innerHTML = response.related_statutes?.length
     ? response.related_statutes.map((statute) => `<span>${escapeHtml(statute)}</span>`).join("")
-    : "<span>관련 조문 후보 없음</span>";
+    : "<span>관련 조문 정보 없음</span>";
 
   baseCaseEl.innerHTML = response.base_precedent
     ? `
@@ -136,7 +148,7 @@ function renderResults(response) {
       </div>
       ${renderCompactMeta(response.base_precedent)}
       <div class="inline-actions">
-        <a href="${escapeAttribute(response.base_precedent.source_url)}" target="_blank" rel="noreferrer">기준 판례 원문</a>
+        <a href="${escapeAttribute(response.base_precedent.source_url)}" target="_blank" rel="noreferrer">공식 원문 열기</a>
       </div>
     `
     : `
@@ -148,7 +160,7 @@ function renderResults(response) {
 
   resultsEl.innerHTML = state.results.length
     ? state.results.map((item) => renderResultCard(item)).join("")
-    : `<p class="empty-state">검색 결과가 없습니다. 사건 정보를 조금 더 구체적으로 입력해 주세요.</p>`;
+    : `<p class="empty-state">검색 결과가 없습니다. 사건 설명이나 조문을 조금 더 구체적으로 입력해주세요.</p>`;
 
   document.querySelectorAll("[data-compare-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -162,7 +174,7 @@ function renderResults(response) {
 function renderResultCard(item) {
   return `
     <article class="result-card">
-      <div class="card-kicker">${escapeHtml(item.result_label)}</div>
+      <div class="card-kicker">${escapeHtml(groupLabels[item.group] || item.result_label)}</div>
       <div class="case-topline">
         <strong>${escapeHtml(item.case_no)}</strong>
         <span>${escapeHtml(item.decision_date)}</span>
@@ -171,7 +183,7 @@ function renderResultCard(item) {
       <p>${escapeHtml(item.legal_issue_summary)}</p>
       ${renderCompactMeta(item)}
       <div class="card-actions">
-        <button type="button" data-compare-id="${escapeAttribute(item.id)}">비교 화면 보기</button>
+        <button type="button" data-compare-id="${escapeAttribute(item.id)}">비교 보기</button>
         <a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">원문</a>
       </div>
     </article>
@@ -191,19 +203,21 @@ function renderCompare(clicked) {
 }
 
 function renderCompareColumn(title, item, base) {
-  const commonStatutes = base.referenced_statutes.filter((statute) => item.referenced_statutes.includes(statute));
+  const statutes = item.referenced_statutes || [];
+  const commonStatutes = (base.referenced_statutes || []).filter((statute) => statutes.includes(statute));
+  const outcome = formatOutcomeLabel(item.outcome_label);
   return `
     <article class="compare-column ${title === "기준 판례" ? "base-column" : ""}">
       <p class="eyebrow">${title}</p>
       <h3>${escapeHtml(item.case_no)}</h3>
       <p class="case-name">${escapeHtml(item.case_name)}</p>
       <dl>
-        <dt>참조조문</dt><dd>${item.referenced_statutes.map(escapeHtml).join(", ") || "없음"}</dd>
+        <dt>참조 조문</dt><dd>${statutes.map(escapeHtml).join(", ") || "없음"}</dd>
         <dt>공통 조문</dt><dd>${commonStatutes.length ? commonStatutes.map(escapeHtml).join(", ") : "없음"}</dd>
         <dt>쟁점</dt><dd>${escapeHtml(item.legal_issue_summary)}</dd>
         <dt>사실관계</dt><dd>${escapeHtml(item.fact_summary)}</dd>
-        <dt>판단 포인트</dt><dd>${escapeHtml(item.decision_point)}</dd>
-        <dt>결론 라벨</dt><dd>${escapeHtml(item.outcome_label)}</dd>
+        <dt>판단 사유</dt><dd>${escapeHtml(item.decision_point)}</dd>
+        <dt>판결 결과</dt><dd>${escapeHtml(outcome)}</dd>
       </dl>
       <a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">공식 원문 열기</a>
     </article>
@@ -214,13 +228,13 @@ function renderCompareSummary(base, comparisons) {
   const rows = comparisons
     .filter((item) => item.id !== base.id)
     .map((item) => {
-      const commonStatutes = base.referenced_statutes.filter((statute) => item.referenced_statutes.includes(statute));
+      const commonStatutes = (base.referenced_statutes || []).filter((statute) => (item.referenced_statutes || []).includes(statute));
       return `
         <tr>
           <td><a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.case_no)}</a></td>
           <td>${commonStatutes.length ? commonStatutes.map(escapeHtml).join(", ") : "없음"}</td>
           <td>${escapeHtml(item.decision_point)}</td>
-          <td>${escapeHtml(item.outcome_label)}</td>
+          <td>${escapeHtml(formatOutcomeLabel(item.outcome_label))}</td>
         </tr>
       `;
     })
@@ -230,34 +244,43 @@ function renderCompareSummary(base, comparisons) {
     <div class="summary-card">
       <div class="section-title">
         <p class="eyebrow">비교 요약</p>
-        <h3>공통 조문과 판단 포인트 차이</h3>
+        <h3>공통 조문과 판단 사유 차이</h3>
       </div>
       <table>
         <thead>
           <tr>
             <th>비교 판례</th>
             <th>공통 조문</th>
-            <th>판단 포인트</th>
-            <th>결론 라벨</th>
+            <th>판단 사유</th>
+            <th>판결 결과</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows || `<tr><td colspan="4">비교할 후보 판례가 없습니다.</td></tr>`}</tbody>
       </table>
       <p class="notice compact">
-        결론 라벨은 검색 보조 정보입니다. 사실관계와 법원의 판단 이유는 각 원문에서 직접 확인해야 합니다.
+        판결 결과 요약은 검색 보조 정보입니다. 사실관계와 법원의 판단 이유는 공식 원문에서 직접 확인해야 합니다.
       </p>
     </div>
   `;
 }
 
 function renderCompactMeta(item) {
+  const outcome = formatOutcomeLabel(item.outcome_label);
   return `
     <dl class="meta-list">
-      <dt>참조조문</dt><dd>${item.referenced_statutes.map(escapeHtml).join(", ") || "없음"}</dd>
-      <dt>판단 포인트</dt><dd>${escapeHtml(item.decision_point)}</dd>
-      <dt>결론 라벨</dt><dd>${escapeHtml(item.outcome_label)}</dd>
+      <dt>참조 조문</dt><dd>${(item.referenced_statutes || []).map(escapeHtml).join(", ") || "없음"}</dd>
+      <dt>판단 사유</dt><dd>${escapeHtml(item.decision_point)}</dd>
+      <dt>판결 결과</dt><dd>${escapeHtml(outcome)}</dd>
     </dl>
   `;
+}
+
+function formatOutcomeLabel(value) {
+  const label = String(value ?? "").trim();
+  if (!label || label === "원문 확인 필요") {
+    return "구조화 결과 없음";
+  }
+  return label;
 }
 
 function buildFallbackSearchQuery() {
