@@ -12,7 +12,8 @@ def load_precedents_from_supabase() -> list[dict[str, Any]]:
             "id, case_no, court_name, decision_date, case_name, source_url, "
             "precedent_structures("
             "referenced_statutes, referenced_cases, legal_domain, case_type, "
-            "legal_issue_summary, fact_summary, outcome_label, decision_point, search_keywords)"
+            "legal_issue_summary, fact_summary, outcome_label, decision_point, search_keywords, "
+            "summary_source, review_status, confidence_score, reviewed, needs_review)"
         )
         .order("decision_date", desc=True)
         .execute()
@@ -46,7 +47,8 @@ def vector_search_precedents(
             "id, case_no, court_name, decision_date, case_name, source_url, "
             "precedent_structures("
             "referenced_statutes, referenced_cases, legal_domain, case_type, "
-            "legal_issue_summary, fact_summary, outcome_label, decision_point, search_keywords)"
+            "legal_issue_summary, fact_summary, outcome_label, decision_point, search_keywords, "
+            "summary_source, review_status, confidence_score, reviewed, needs_review)"
         )
         .in_("id", ids)
         .execute()
@@ -81,4 +83,9 @@ def _flatten_precedent(row: dict[str, Any]) -> dict[str, Any]:
         "outcome_label": structure.get("outcome_label") or "",
         "decision_point": structure.get("decision_point") or "",
         "search_keywords": structure.get("search_keywords") or [],
+        "summary_source": structure.get("summary_source") or "rules",
+        "review_status": structure.get("review_status") or "unreviewed",
+        "confidence_score": float(structure.get("confidence_score") or 0),
+        "reviewed": bool(structure.get("reviewed") or False),
+        "needs_review": bool(structure.get("needs_review") or False),
     }

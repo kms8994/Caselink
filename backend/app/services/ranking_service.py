@@ -57,4 +57,4 @@ def classify_group(precedent: dict, parsed: ParsedQuery, base: dict | None) -> s
 
 
 def _normalize_statute(value: str) -> str:
-    return "".join(value.split()).replace("법제", "법 제")
+    return "".join(value.split())

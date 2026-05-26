@@ -1,15 +1,45 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from collections import OrderedDict
 from typing import Any
 
 import requests
 from pydantic import ValidationError
 
-from app.core.config import GEMINI_API_KEY, INTAKE_LLM_MODEL, INTAKE_LLM_PROVIDER
+from app.core.config import (
+    GEMINI_API_KEY,
+    INTAKE_CACHE_SIZE,
+    INTAKE_LLM_ENABLED,
+    INTAKE_LLM_MODEL,
+    INTAKE_LLM_PROVIDER,
+    INTAKE_MAX_LLM_USER_TURNS,
+    INTAKE_READY_CHAR_THRESHOLD,
+    INTAKE_TOKEN_BUDGET_CHARS,
+)
 from app.schemas.intake import IntakeMessage, IntakeResponse
 
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+CASE_NO_RE = re.compile(r"\b\d{4}[가-힣]{1,3}\d{1,6}\b")
+STATUTE_RE = re.compile(r"(법|민법|형법|주택임대차보호법|상가건물 임대차보호법|근로기준법).{0,20}제\s*\d+\s*조")
+DISPUTE_KEYWORDS = (
+    "임대",
+    "임차",
+    "계약",
+    "갱신",
+    "거절",
+    "통지",
+    "보증금",
+    "전입",
+    "확정일자",
+    "대항력",
+    "해고",
+    "손해배상",
+)
+
+_INTAKE_CACHE: OrderedDict[str, IntakeResponse] = OrderedDict()
 
 INTAKE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -38,61 +68,76 @@ INTAKE_SCHEMA: dict[str, Any] = {
 }
 
 SYSTEM_PROMPT = """
-너는 Caselink의 판례 검색 전 사건정보 정리기다.
-법률 자문이나 결론 판단을 하지 말고, 판례 검색에 필요한 사실만 구조화한다.
+당신은 Caselink의 판례 검색 문진 도우미입니다.
+법률 결론을 내리지 말고, 판례 검색에 필요한 사실만 구조화하세요.
 
-목표:
-1. 사용자의 일반어 진술에서 사건 유형과 핵심 사실을 추출한다.
-2. 판례 검색에 중요한 정보가 부족하면 status를 need_more_info로 둔다.
-3. 부족한 정보는 한 번에 2~4개까지만 질문한다.
-4. 충분하면 status를 ready로 둔다.
-5. ready일 때는 search_query를 한국어 법률 검색 질의로 작성한다.
-6. search_query에는 사실관계, 쟁점, 관련 조문 후보를 자연스럽게 포함한다.
-
-임대차 사건에서 특히 확인할 정보:
-- 당사자 지위: 임대인/임차인/전차인/보증금 반환 청구자 등
-- 목적물: 주택/상가/토지 등
-- 분쟁 유형: 갱신거절, 보증금 반환, 대항력, 우선변제권, 명도 등
-- 핵심 날짜: 계약 시작일, 만료일, 통지일, 점유/전입/확정일자 등
-- 통지 방식과 내용
-- 상대방이 주장하는 사유
-- 사용자가 원하는 결과
-
-출력 규칙:
-- 반드시 JSON 객체만 반환한다.
-- status가 need_more_info이면 search_query는 null이어야 한다.
-- status가 ready이면 follow_up_questions는 빈 배열이어야 한다.
-- 모르는 사실은 추측하지 말고 missing_fields에 넣는다.
-- related_statutes는 후보 조문만 넣고 확정적으로 단정하지 않는다.
-- embedding_targets는 combined, facts, issue, statute 중 필요한 값을 1개 이상 넣는다.
+규칙:
+- 반드시 JSON 객체만 반환합니다.
+- 정보가 부족하면 status는 need_more_info, search_query는 null입니다.
+- 질문은 가장 중요한 1개만 작성합니다.
+- 정보가 충분하면 status는 ready, follow_up_questions는 빈 배열입니다.
+- 모르는 사실을 추측하지 않습니다.
+- related_statutes는 가능성 있는 조문 후보만 넣고 단정하지 않습니다.
 """
 
 
 def run_intake(messages: list[IntakeMessage], current_facts: dict[str, Any] | None = None) -> IntakeResponse:
-    if INTAKE_LLM_PROVIDER != "gemini":
-        return _fallback_intake(messages, current_facts or {})
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is required for intake.")
+    facts = current_facts or {}
+    local_response = _local_intake(messages, facts)
+    if local_response is not None:
+        return local_response
 
-    payload = _build_gemini_payload(messages, current_facts or {})
-    response = requests.post(
-        GEMINI_ENDPOINT.format(model=INTAKE_LLM_MODEL),
-        params={"key": GEMINI_API_KEY},
-        json=payload,
-        timeout=40,
-    )
-    response.raise_for_status()
-    text = _extract_gemini_text(response.json())
+    if INTAKE_LLM_PROVIDER != "gemini" or not INTAKE_LLM_ENABLED or not GEMINI_API_KEY:
+        return _fallback_intake(messages, facts)
+
+    payload = _build_gemini_payload(messages, facts)
+    cache_key = _cache_key(payload)
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        return IntakeResponse.model_validate_json(text)
-    except ValidationError:
-        return IntakeResponse.model_validate(json.loads(_strip_json_fence(text)))
+        response = requests.post(
+            GEMINI_ENDPOINT.format(model=INTAKE_LLM_MODEL),
+            params={"key": GEMINI_API_KEY},
+            json=payload,
+            timeout=20,
+        )
+        response.raise_for_status()
+        text = _extract_gemini_text(response.json())
+        result = _limit_questions(_parse_intake_response(text))
+    except (json.JSONDecodeError, requests.RequestException, RuntimeError, ValidationError):
+        return _fallback_intake(messages, facts)
+
+    _set_cached(cache_key, result)
+    return result
+
+
+def _local_intake(messages: list[IntakeMessage], current_facts: dict[str, Any]) -> IntakeResponse | None:
+    joined = _joined_user_text(messages)
+    user_turns = sum(1 for message in messages if message.role == "user")
+    if not joined:
+        return _fallback_intake(messages, current_facts)
+
+    if CASE_NO_RE.search(joined) or STATUTE_RE.search(joined):
+        return _ready_response(joined, current_facts, confidence=0.7)
+
+    if len(joined) >= 40 and any(keyword in joined for keyword in DISPUTE_KEYWORDS):
+        return _ready_response(joined, current_facts, confidence=0.55)
+
+    if len(joined) >= INTAKE_READY_CHAR_THRESHOLD:
+        return _ready_response(joined, current_facts, confidence=0.55)
+
+    if user_turns > INTAKE_MAX_LLM_USER_TURNS:
+        return _ready_response(joined, current_facts, confidence=0.45)
+
+    return None
 
 
 def _build_gemini_payload(messages: list[IntakeMessage], current_facts: dict[str, Any]) -> dict[str, Any]:
-    conversation = "\n".join(f"{message.role}: {message.content}" for message in messages)
+    conversation = "\n".join(f"{message.role}: {message.content}" for message in _compact_messages(messages))
     prompt = {
-        "current_facts": current_facts,
+        "current_facts": _trim_jsonable(current_facts, max_chars=600),
         "conversation": conversation,
     }
     return {
@@ -100,10 +145,18 @@ def _build_gemini_payload(messages: list[IntakeMessage], current_facts: dict[str
         "contents": [{"role": "user", "parts": [{"text": json.dumps(prompt, ensure_ascii=False)}]}],
         "generationConfig": {
             "temperature": 0.1,
+            "maxOutputTokens": 700,
             "responseMimeType": "application/json",
             "responseJsonSchema": INTAKE_SCHEMA,
         },
     }
+
+
+def _parse_intake_response(text: str) -> IntakeResponse:
+    try:
+        return IntakeResponse.model_validate_json(text)
+    except ValidationError:
+        return IntakeResponse.model_validate(json.loads(_strip_json_fence(text)))
 
 
 def _extract_gemini_text(payload: dict[str, Any]) -> str:
@@ -123,10 +176,10 @@ def _strip_json_fence(text: str) -> str:
 
 
 def _fallback_intake(messages: list[IntakeMessage], current_facts: dict[str, Any]) -> IntakeResponse:
-    joined = " ".join(message.content for message in messages)
-    facts = dict(current_facts)
-    facts["user_statement"] = joined
-    if len(joined) < 60:
+    joined = _joined_user_text(messages)
+    if len(joined) < INTAKE_READY_CHAR_THRESHOLD:
+        facts = dict(current_facts)
+        facts["user_statement"] = joined
         return IntakeResponse(
             status="need_more_info",
             domain="unknown",
@@ -134,18 +187,22 @@ def _fallback_intake(messages: list[IntakeMessage], current_facts: dict[str, Any
             extracted_facts=facts,
             missing_fields=["분쟁 유형", "중요 날짜", "상대방 주장", "원하는 결과"],
             follow_up_questions=[
-                "어떤 분쟁인지 한 문장으로 더 구체적으로 설명해 주세요.",
-                "계약일, 만료일, 통지일처럼 중요한 날짜가 있나요?",
-                "상대방은 어떤 이유를 주장하고 있나요?",
+                "어떤 분쟁인지 한 문장으로 조금 더 구체적으로 적어주세요.",
             ],
             search_query=None,
             related_statutes=[],
             embedding_targets=[],
         )
+    return _ready_response(joined, current_facts, confidence=0.5)
+
+
+def _ready_response(joined: str, current_facts: dict[str, Any], confidence: float) -> IntakeResponse:
+    facts = dict(current_facts)
+    facts["user_statement"] = joined
     return IntakeResponse(
         status="ready",
         domain="unknown",
-        confidence=0.5,
+        confidence=confidence,
         extracted_facts=facts,
         missing_fields=[],
         follow_up_questions=[],
@@ -153,3 +210,62 @@ def _fallback_intake(messages: list[IntakeMessage], current_facts: dict[str, Any
         related_statutes=[],
         embedding_targets=["combined", "facts", "issue"],
     )
+
+
+def _limit_questions(response: IntakeResponse) -> IntakeResponse:
+    if len(response.follow_up_questions) <= 1:
+        return response
+    return response.model_copy(update={"follow_up_questions": response.follow_up_questions[:1]})
+
+
+def _compact_messages(messages: list[IntakeMessage]) -> list[IntakeMessage]:
+    compact = [message for message in messages if message.role == "user"][-2:]
+    budget = max(INTAKE_TOKEN_BUDGET_CHARS, 400)
+    result: list[IntakeMessage] = []
+    remaining = budget
+    for message in reversed(compact):
+        content = _normalize_space(message.content)
+        if len(content) > remaining:
+            content = content[:remaining].rstrip()
+        result.append(IntakeMessage(role=message.role, content=content))
+        remaining -= len(content)
+        if remaining <= 0:
+            break
+    return list(reversed(result))
+
+
+def _joined_user_text(messages: list[IntakeMessage]) -> str:
+    return _normalize_space(" ".join(message.content for message in messages if message.role == "user"))
+
+
+def _normalize_space(value: str) -> str:
+    return " ".join(value.strip().split())
+
+
+def _trim_jsonable(value: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if len(encoded) <= max_chars:
+        return value
+    return {"summary": encoded[:max_chars].rstrip()}
+
+
+def _cache_key(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _get_cached(key: str) -> IntakeResponse | None:
+    value = _INTAKE_CACHE.get(key)
+    if value is None:
+        return None
+    _INTAKE_CACHE.move_to_end(key)
+    return value
+
+
+def _set_cached(key: str, value: IntakeResponse) -> None:
+    if INTAKE_CACHE_SIZE <= 0:
+        return
+    _INTAKE_CACHE[key] = value
+    _INTAKE_CACHE.move_to_end(key)
+    while len(_INTAKE_CACHE) > INTAKE_CACHE_SIZE:
+        _INTAKE_CACHE.popitem(last=False)

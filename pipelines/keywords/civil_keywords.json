@@ -1,0 +1,41 @@
+{
+  "description": "Civil precedent collection seed keywords for Supreme Court based Caselink ingestion.",
+  "keywords": [
+    { "group": "lease_deposit", "query": "임대차보증금", "limit": 120 },
+    { "group": "lease_deposit", "query": "주택임대차", "limit": 120 },
+    { "group": "lease_deposit", "query": "상가임대차", "limit": 100 },
+    { "group": "lease_deposit", "query": "계약갱신", "limit": 100 },
+    { "group": "lease_deposit", "query": "차임증감", "limit": 80 },
+
+    { "group": "contract_debt", "query": "계약해제", "limit": 120 },
+    { "group": "contract_debt", "query": "채무불이행", "limit": 120 },
+    { "group": "contract_debt", "query": "손해배상", "limit": 150 },
+    { "group": "contract_debt", "query": "부당이득", "limit": 120 },
+    { "group": "contract_debt", "query": "대여금", "limit": 100 },
+    { "group": "contract_debt", "query": "매매계약", "limit": 100 },
+
+    { "group": "real_estate", "query": "소유권이전등기", "limit": 130 },
+    { "group": "real_estate", "query": "소유권말소등기", "limit": 100 },
+    { "group": "real_estate", "query": "점유취득시효", "limit": 120 },
+    { "group": "real_estate", "query": "공유물분할", "limit": 90 },
+    { "group": "real_estate", "query": "명의신탁", "limit": 100 },
+    { "group": "real_estate", "query": "유치권", "limit": 90 },
+
+    { "group": "tort", "query": "불법행위", "limit": 120 },
+    { "group": "tort", "query": "사용자책임", "limit": 90 },
+    { "group": "tort", "query": "공동불법행위", "limit": 90 },
+    { "group": "tort", "query": "위자료", "limit": 90 },
+    { "group": "tort", "query": "손해배상책임", "limit": 120 },
+
+    { "group": "inheritance_family", "query": "상속재산분할", "limit": 80 },
+    { "group": "inheritance_family", "query": "유류분", "limit": 90 },
+    { "group": "inheritance_family", "query": "상속회복", "limit": 70 },
+    { "group": "inheritance_family", "query": "증여", "limit": 80 },
+
+    { "group": "commerce_company", "query": "주주총회", "limit": 80 },
+    { "group": "commerce_company", "query": "이사책임", "limit": 80 },
+    { "group": "commerce_company", "query": "물품대금", "limit": 90 },
+    { "group": "commerce_company", "query": "하도급", "limit": 80 },
+    { "group": "commerce_company", "query": "약속어음", "limit": 70 }
+  ]
+}

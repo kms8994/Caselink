@@ -34,6 +34,11 @@ class PrecedentCard(BaseModel):
     source_url: str
     result_label: str
     group: ResultGroup
+    summary_source: str = "rules"
+    review_status: str = "unreviewed"
+    confidence_score: float = 0
+    reviewed: bool = False
+    needs_review: bool = False
 
 
 class SearchResponse(BaseModel):
@@ -59,4 +64,3 @@ class CompareResponse(BaseModel):
     different_decision_point: str
     outcome_label_difference: str
     caution: str
-
