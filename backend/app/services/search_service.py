@@ -3,7 +3,6 @@ from app.schemas.search import ParsedQuery, PrecedentCard, SearchResponse
 from app.services.query_parser import parse_query
 from app.services.ranking_service import classify_group, score_precedent
 from app.services.sample_repository import get_precedent, load_precedents
-from app.services.supabase_repository import load_precedents_from_supabase, vector_search_precedents
 
 CAUTION = (
     "이 서비스의 요약과 비교 설명은 검색 보조 정보입니다. "
@@ -92,6 +91,8 @@ def _load_precedents() -> list[dict]:
     if USE_SAMPLE_DATA:
         return load_precedents()
     try:
+        from app.services.supabase_repository import load_precedents_from_supabase
+
         return load_precedents_from_supabase()
     except Exception:
         return []
@@ -131,6 +132,8 @@ def _load_vector_candidates(query: str, parsed: ParsedQuery) -> list[dict]:
         from app.services.embedding_service import embed_query
 
         query_embedding = embed_query(_build_embedding_query(query, parsed))
+        from app.services.supabase_repository import vector_search_precedents
+
         embedding_types = _embedding_types_for_query(parsed)
         merged: dict[str, dict] = {}
         for embedding_type in embedding_types:
