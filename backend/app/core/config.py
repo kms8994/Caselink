@@ -25,9 +25,18 @@ def get_int(name: str, default: int) -> int:
         return default
 
 
+def get_csv(name: str, default: list[str]) -> list[str]:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or default
+
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 USE_SAMPLE_DATA = get_bool("USE_SAMPLE_DATA", True)
+BACKEND_CORS_ORIGINS = get_csv("BACKEND_CORS_ORIGINS", ["*"])
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
 EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "auto")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

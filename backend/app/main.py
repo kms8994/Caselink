@@ -5,6 +5,7 @@ from app.api.feedback import router as feedback_router
 from app.api.intake import router as intake_router
 from app.api.precedents import router as precedents_router
 from app.api.search import router as search_router
+from app.core.config import BACKEND_CORS_ORIGINS
 
 app = FastAPI(
     title="Caselink API",
@@ -14,8 +15,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=BACKEND_CORS_ORIGINS,
+    allow_credentials="*" not in BACKEND_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

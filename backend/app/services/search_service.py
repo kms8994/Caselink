@@ -1,6 +1,5 @@
 from app.core.config import USE_SAMPLE_DATA
 from app.schemas.search import ParsedQuery, PrecedentCard, SearchResponse
-from app.services.embedding_service import embed_query
 from app.services.query_parser import parse_query
 from app.services.ranking_service import classify_group, score_precedent
 from app.services.sample_repository import get_precedent, load_precedents
@@ -129,6 +128,8 @@ def _candidate_pool(
 
 def _load_vector_candidates(query: str, parsed: ParsedQuery) -> list[dict]:
     try:
+        from app.services.embedding_service import embed_query
+
         query_embedding = embed_query(_build_embedding_query(query, parsed))
         embedding_types = _embedding_types_for_query(parsed)
         merged: dict[str, dict] = {}
