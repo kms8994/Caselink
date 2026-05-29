@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from app.core.config import USE_SAMPLE_DATA
 from app.schemas.search import ParsedQuery, PrecedentCard, SearchResponse
 from app.services.query_parser import parse_query
@@ -61,12 +63,14 @@ def search(query: str, query_type: str = "auto") -> SearchResponse:
         "different_decision_point": [],
     }
 
-    for item, _score in ranked[:12]:
+    for item, _score in ranked:
         if item.get("id") == (base or {}).get("id"):
             continue
-        group = classify_group(item, parsed, base)
+        group = _classify_group_for_query(item, parsed, base)
         if len(groups[group]) < 3:
             groups[group].append(to_card(item, group))
+        if all(len(groups[group]) >= 3 for group in groups):
+            break
 
     has_group_results = any(groups[group] for group in groups)
     return SearchResponse(
@@ -91,11 +95,16 @@ def _load_precedents() -> list[dict]:
     if USE_SAMPLE_DATA:
         return load_precedents()
     try:
-        from app.services.supabase_repository import load_precedents_from_supabase
-
-        return load_precedents_from_supabase()
+        return _load_precedents_from_supabase_cached()
     except Exception:
         return []
+
+
+@lru_cache(maxsize=1)
+def _load_precedents_from_supabase_cached() -> list[dict]:
+    from app.services.supabase_repository import load_precedents_from_supabase
+
+    return load_precedents_from_supabase()
 
 
 def _find_base_precedent(precedents: list[dict], parsed: ParsedQuery) -> dict | None:
@@ -158,9 +167,9 @@ def _build_embedding_query(query: str, parsed: ParsedQuery) -> str:
 
 def _embedding_types_for_query(parsed: ParsedQuery) -> list[str]:
     if parsed.query_type == "statute":
-        return ["statute", "combined", "issue"]
+        return ["statute", "issue"]
     if parsed.query_type == "case_no":
-        return ["combined", "issue", "facts"]
+        return ["statute", "combined", "issue", "facts"]
     return ["combined", "facts", "issue"]
 
 
@@ -170,8 +179,53 @@ def _rank_candidates(candidates, parsed: ParsedQuery, vector_candidates: list[di
     for item in candidates:
         keyword_score = score_precedent(item, parsed)
         vector_score = vector_scores.get(item["id"], 0) * 80
-        ranked.append((item, keyword_score + vector_score))
+        intent_score = _intent_boost(item, parsed)
+        ranked.append((item, keyword_score + vector_score + intent_score))
     return sorted(ranked, key=lambda pair: pair[1], reverse=True)
+
+
+def _intent_boost(item: dict, parsed: ParsedQuery) -> float:
+    embedding_type = item.get("vector_embedding_type")
+    statute_hits = _statute_hits(item, parsed)
+    if parsed.query_type == "statute":
+        return (35 if statute_hits else 0) + (10 if embedding_type == "statute" else 0)
+    if parsed.query_type == "case_no":
+        return (25 if statute_hits else 0) + (8 if embedding_type in {"issue", "combined"} else 0)
+    fact_text = item.get("fact_summary", "")
+    fact_hits = sum(1 for keyword in parsed.keywords if keyword and keyword in fact_text)
+    return (18 if fact_hits else 0) + (10 if embedding_type == "facts" else 0) + (6 if embedding_type == "combined" else 0)
+
+
+def _classify_group_for_query(item: dict, parsed: ParsedQuery, base: dict | None) -> str:
+    statute_hits = _statute_hits(item, parsed)
+    fact_text = item.get("fact_summary", "")
+    fact_hits = any(keyword and keyword in fact_text for keyword in parsed.keywords)
+
+    if parsed.query_type == "natural":
+        if fact_hits:
+            return "fact_similar"
+        if statute_hits:
+            return "statute_related"
+        return "different_decision_point"
+
+    if parsed.query_type == "statute":
+        if statute_hits:
+            return "statute_related"
+        if fact_hits:
+            return "fact_similar"
+        return "different_decision_point"
+
+    return classify_group(item, parsed, base)
+
+
+def _statute_hits(item: dict, parsed: ParsedQuery) -> set[str]:
+    parsed_statutes = {_normalize_statute(statute) for statute in parsed.statutes}
+    precedent_statutes = {_normalize_statute(statute) for statute in item.get("referenced_statutes", [])}
+    return parsed_statutes.intersection(precedent_statutes)
+
+
+def _normalize_statute(value: str) -> str:
+    return "".join(value.split())
 
 
 def _is_relevant(

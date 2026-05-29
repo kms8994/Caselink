@@ -1,3 +1,5 @@
+from threading import Thread
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,6 +27,20 @@ app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(intake_router, prefix="/api", tags=["intake"])
 app.include_router(precedents_router, prefix="/api", tags=["precedents"])
 app.include_router(feedback_router, prefix="/api", tags=["feedback"])
+
+
+@app.on_event("startup")
+def warmup_search_dependencies() -> None:
+    Thread(target=_warmup_embedding_model, daemon=True).start()
+
+
+def _warmup_embedding_model() -> None:
+    try:
+        from app.services.embedding_service import embed_query
+
+        embed_query("search warmup")
+    except Exception:
+        pass
 
 
 @app.get("/api/health")

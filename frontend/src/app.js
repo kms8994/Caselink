@@ -8,6 +8,7 @@ const state = {
   base: null,
   results: [],
   queryType: "natural",
+  selectedBaseStatute: null,
 };
 
 const views = {
@@ -93,6 +94,72 @@ const groupDescriptions = {
   different_decision_point: "쟁점은 비슷하지만 법원이 본 판단 사유가 다른 후보입니다.",
 };
 
+const resultModeConfigs = {
+  natural: {
+    summaryLabel: "입력 사건",
+    relatedLabel: "추론된 조문 후보",
+    resultTitle: "입력 사건과 가까운 판례를 검토하세요.",
+    inputEyebrow: "입력 사건",
+    inputTitle: "입력한 사건 설명 기준",
+    compareBaseTitle: "입력 사건",
+    groupOrder: ["fact_similar", "statute_related", "different_decision_point"],
+    groupLabels: {
+      fact_similar: "사실관계 유사 판례",
+      statute_related: "관련 조문 판례",
+      different_decision_point: "판단 사유가 다른 판례",
+    },
+    groupDescriptions: {
+      fact_similar: "입력한 사건 설명과 사실관계가 비슷한 후보입니다.",
+      statute_related: "추론된 조문과 연결되는 판례를 함께 확인합니다.",
+      different_decision_point: "비슷한 쟁점에서 법원이 다르게 본 판단 사유를 비교합니다.",
+    },
+    emptyTitle: "입력 사건과 가까운 판례가 없습니다.",
+    emptyDescription: "사건의 핵심 사실, 금액, 날짜, 상대방 주장, 원하는 결과를 조금 더 구체적으로 입력해보세요.",
+  },
+  statute: {
+    summaryLabel: "기준 조문",
+    relatedLabel: "정규화된 조문",
+    resultTitle: "조문 적용 판례를 검토하세요.",
+    inputEyebrow: "기준 조문",
+    inputTitle: "입력한 조문 기준",
+    compareBaseTitle: "기준 조문",
+    groupOrder: ["statute_related", "different_decision_point", "fact_similar"],
+    groupLabels: {
+      statute_related: "해당 조문 적용 판례",
+      different_decision_point: "조문 적용 방식 비교 판례",
+      fact_similar: "사실관계 참고 판례",
+    },
+    groupDescriptions: {
+      statute_related: "입력한 조문과 직접 연결되는 판례입니다.",
+      different_decision_point: "같은 조문 주변에서 판단 사유가 달라 비교할 만한 후보입니다.",
+      fact_similar: "조문 적용 장면을 이해하는 데 참고할 사실관계 후보입니다.",
+    },
+    emptyTitle: "해당 조문과 연결된 판례가 없습니다.",
+    emptyDescription: "법률명과 조문 번호를 함께 입력하거나 인접 조문으로 다시 검색해보세요.",
+  },
+  case_no: {
+    summaryLabel: "기준 판례",
+    relatedLabel: "기준 판례 참조 조문",
+    resultTitle: "기준 판례와 비교할 후보를 검토하세요.",
+    inputEyebrow: "입력 사건번호",
+    inputTitle: "입력한 사건번호 기준",
+    compareBaseTitle: "기준 판례",
+    groupOrder: ["statute_related", "fact_similar", "different_decision_point"],
+    groupLabels: {
+      statute_related: "같은 조문 참조 판례",
+      fact_similar: "사실관계 유사 판례",
+      different_decision_point: "판단 사유가 다른 판례",
+    },
+    groupDescriptions: {
+      statute_related: "기준 판례와 같은 조문을 참조한 후보입니다.",
+      fact_similar: "기준 판례와 사실관계가 비슷해 비교할 후보입니다.",
+      different_decision_point: "기준 판례와 쟁점은 가깝지만 판단 사유가 다른 후보입니다.",
+    },
+    emptyTitle: "기준 판례와 비교할 후보가 없습니다.",
+    emptyDescription: "DB에 없는 사건번호일 수 있습니다. 사건번호를 확인하거나 조문/자연어 검색으로 넓혀보세요.",
+  },
+};
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   await startIntake(queryInput.value);
@@ -174,7 +241,7 @@ async function runIntake() {
 
 async function runSearch(query) {
   try {
-    setLoading("관련 판례를 검색하고 있습니다.");
+    showSearchLoading("검색 중입니다.");
     const response = await postJson("/search", {
       query,
       query_type: state.queryType,
@@ -219,23 +286,37 @@ function renderQuestion(question, index) {
 
 function renderResults(response) {
   const hasResults = flattenResults(response.results).length > 0;
-  detectedTypeEl.textContent = queryTypeLabels[response.detected_query_type] || response.detected_query_type;
+  const config = getResultModeConfig(response);
+  syncSelectedBaseStatute(response);
+  document.querySelector("#results-title").textContent = config.resultTitle;
+  detectedTypeEl.textContent = getResultSummaryValue(response, config);
+  const summaryLabels = document.querySelectorAll(".result-summary .meta-label");
+  if (summaryLabels[0]) summaryLabels[0].textContent = config.summaryLabel;
+  if (summaryLabels[1]) summaryLabels[1].textContent = config.relatedLabel;
   statutesEl.innerHTML = response.related_statutes?.length
     ? response.related_statutes.map((statute) => `<span>${escapeHtml(statute)}</span>`).join("")
-    : "<span>관련 조문 정보 없음</span>";
+    : `<span>${escapeHtml(config.relatedEmptyLabel || "관련 조문 정보 없음")}</span>`;
 
   if (response.base_precedent && hasResults) {
     baseCaseEl.classList.remove("hidden");
-    baseCaseEl.innerHTML = renderBaseCase(response.base_precedent);
+    baseCaseEl.innerHTML = renderBaseCase(response.base_precedent, config);
   } else if (hasResults) {
     baseCaseEl.classList.remove("hidden");
-    baseCaseEl.innerHTML = renderInputCase(response);
+    baseCaseEl.innerHTML = renderInputCase(response, config);
   } else {
     baseCaseEl.classList.add("hidden");
     baseCaseEl.innerHTML = "";
   }
 
-  resultsEl.innerHTML = renderGroupedResults(response.results || {});
+  resultsEl.innerHTML = renderGroupedResults(response.results || {}, config);
+
+  const baseStatuteSelect = document.querySelector("[data-base-statute-select]");
+  if (baseStatuteSelect) {
+    baseStatuteSelect.addEventListener("change", () => {
+      state.selectedBaseStatute = baseStatuteSelect.value;
+      renderResults(state.searchResponse);
+    });
+  }
 
   document.querySelectorAll("[data-compare-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -246,10 +327,10 @@ function renderResults(response) {
   });
 }
 
-function renderBaseCase(item) {
+function renderBaseCase(item, config = getResultModeConfig()) {
   return `
     <div class="section-title">
-      <p class="eyebrow">기준 판례</p>
+      <p class="eyebrow">${escapeHtml(config.compareBaseTitle || "기준 판례")}</p>
       <h3>${escapeHtml(item.case_no)}</h3>
     </div>
     <p class="case-name">${escapeHtml(item.case_name)}</p>
@@ -260,27 +341,55 @@ function renderBaseCase(item) {
   `;
 }
 
-function renderInputCase(response) {
+function renderInputCase(response, config = getResultModeConfig(response)) {
+  const statuteSelector = response.detected_query_type === "statute" ? renderBaseStatuteSelector(response) : "";
+  const relatedValue = response.related_statutes?.length
+    ? response.related_statutes.map(escapeHtml).join(", ")
+    : "없음";
   return `
     <div class="section-title">
-      <p class="eyebrow">입력 사건</p>
-      <h3>입력한 사건 설명 기준</h3>
+      <p class="eyebrow">${escapeHtml(config.inputEyebrow)}</p>
+      <h3>${escapeHtml(config.inputTitle)}</h3>
     </div>
-    <p class="case-name">${escapeHtml(summarizeText(response.query, 180))}</p>
+    ${statuteSelector || `<p class="case-name">${escapeHtml(summarizeText(response.query, 180))}</p>`}
     <dl class="meta-list">
       <dt>입력 유형</dt><dd>${escapeHtml(queryTypeLabels[response.detected_query_type] || response.detected_query_type)}</dd>
-      <dt>조문 후보</dt><dd>${(response.related_statutes || []).map(escapeHtml).join(", ") || "없음"}</dd>
+      <dt>${escapeHtml(config.relatedLabel)}</dt><dd>${relatedValue}</dd>
     </dl>
   `;
 }
 
-function renderGroupedResults(results) {
-  const nonEmptyGroups = Object.entries(groupLabels).filter(([group]) => (results[group] || []).length > 0);
+function renderBaseStatuteSelector(response) {
+  const statutes = response.related_statutes || [];
+  if (!statutes.length) {
+    return `<p class="base-statute-note">기준으로 사용할 조문 후보가 없습니다.</p>`;
+  }
+
+  const selected = getSelectedBaseStatute(response);
+  return `
+    <label class="base-statute-control">
+      <span>기준 조문</span>
+      <select data-base-statute-select>
+        ${statutes
+          .map(
+            (statute) =>
+              `<option value="${escapeAttribute(statute)}" ${statute === selected ? "selected" : ""}>${escapeHtml(statute)}</option>`,
+          )
+          .join("")}
+      </select>
+    </label>
+  `;
+}
+
+function renderGroupedResults(results, config = getResultModeConfig()) {
+  const nonEmptyGroups = config.groupOrder
+    .map((group) => [group, getGroupLabel(group, config)])
+    .filter(([group]) => (results[group] || []).length > 0);
   if (!nonEmptyGroups.length) {
     return `
       <section class="result-empty-state">
-        <h3>관련 판례가 없습니다.</h3>
-        <p>현재 입력과 충분히 관련 있는 판례를 찾지 못했습니다. 사건번호, 조문, 핵심 사실을 더 구체적으로 입력해보세요.</p>
+        <h3>${escapeHtml(config.emptyTitle)}</h3>
+        <p>${escapeHtml(config.emptyDescription)}</p>
       </section>
     `;
   }
@@ -293,7 +402,7 @@ function renderGroupedResults(results) {
           <div class="result-section-header">
             <div>
               <h3>${escapeHtml(label)}</h3>
-              <p>${escapeHtml(groupDescriptions[group])}</p>
+              <p>${escapeHtml(getGroupDescription(group, config))}</p>
             </div>
             <span>${items.length}건</span>
           </div>
@@ -307,16 +416,16 @@ function renderGroupedResults(results) {
 }
 
 function renderResultCard(item) {
-  const issue = summarizeText(item.legal_issue_summary, 170);
+  const config = getResultModeConfig();
   return `
     <article class="result-card">
-      <div class="card-kicker">${escapeHtml(groupLabels[item.group] || item.result_label)}</div>
+      <div class="card-kicker">${escapeHtml(getGroupLabel(item.group, config) || item.result_label)}</div>
       <div class="case-topline">
         <strong>${escapeHtml(item.case_no)}</strong>
         <span>${escapeHtml(item.decision_date)}</span>
       </div>
       <h3>${escapeHtml(item.case_name)}</h3>
-      <p>${escapeHtml(issue)}</p>
+      ${shouldShowStatuteComparisonPoints(item) ? renderStatuteComparisonPoints(item) : ""}
       ${renderCompactMeta(item)}
       <div class="card-actions">
         <button type="button" data-compare-id="${escapeAttribute(item.id)}">비교 보기</button>
@@ -326,7 +435,38 @@ function renderResultCard(item) {
   `;
 }
 
+function shouldShowStatuteComparisonPoints(item) {
+  return state.searchResponse?.detected_query_type === "statute" && item.group === "different_decision_point";
+}
+
+function renderStatuteComparisonPoints(item) {
+  const selectedStatute = getSelectedBaseStatute();
+  const itemStatutes = item.referenced_statutes || [];
+  const directlyUsesBase = selectedStatute && getCommonStatutes([selectedStatute], itemStatutes).length > 0;
+  const comparisonPoint = directlyUsesBase
+    ? "선택한 기준 조문을 함께 참조합니다."
+    : "선택한 기준 조문과 직접 일치하지 않아 인접 조문과 쟁점 흐름을 기준으로 비교합니다.";
+
+  return `
+    <dl class="comparison-points" aria-label="조문 적용 비교 포인트">
+      <div>
+        <dt>기준 조문</dt>
+        <dd>${escapeHtml(selectedStatute || "선택 조문 없음")}</dd>
+      </div>
+      <div>
+        <dt>비교 포인트</dt>
+        <dd>${escapeHtml(comparisonPoint)}</dd>
+      </div>
+      <div>
+        <dt>판단 요지</dt>
+        <dd>${escapeHtml(extractDecisionBasis(item, 90))}</dd>
+      </div>
+    </dl>
+  `;
+}
+
 function renderCompare(clicked) {
+  const config = getResultModeConfig();
   const base = state.base || buildInputCaseBase();
   if (!base || !clicked) return;
   const comparisons = clicked.id === base.id ? [] : [clicked];
@@ -334,28 +474,28 @@ function renderCompare(clicked) {
 
   compareBoardEl.classList.toggle("is-pair", columns.length === 2);
   compareBoardEl.innerHTML = columns
-    .map((item, index) => renderCompareColumn(index === 0 ? (item.isInputCase ? "입력 사건" : "기준 판례") : `비교 판례 ${index}`, item, base))
+    .map((item, index) => renderCompareColumn(index === 0 ? config.compareBaseTitle : `비교 판례 ${index}`, item, base))
     .join("");
   compareSummaryEl.innerHTML = renderCompareSummary(base, comparisons);
 }
 
 function renderCompareColumn(title, item, base) {
   const statutes = item.referenced_statutes || [];
-  const commonStatutes = (base.referenced_statutes || []).filter((statute) => statutes.includes(statute));
+  const commonStatutes = getCommonStatutes(base.referenced_statutes || [], statutes);
   const outcome = formatOutcomeLabel(item.outcome_label);
   const outcomeRow = outcome ? `<dt>판결 결과</dt><dd>${escapeHtml(outcome)}</dd>` : "";
   const sourceLink = item.source_url
     ? `<a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">공식 원문 열기</a>`
     : "";
   return `
-    <article class="compare-column ${title === "기준 판례" || title === "입력 사건" ? "base-column" : ""}">
+    <article class="compare-column ${item.id === base.id ? "base-column" : ""}">
       <p class="eyebrow">${title}</p>
       <h3>${escapeHtml(item.case_no)}</h3>
       <p class="case-name">${escapeHtml(item.case_name)}</p>
       <dl>
         <dt>${item.isInputCase ? "조문 후보" : "참조 조문"}</dt><dd>${statutes.map(escapeHtml).join(", ") || "없음"}</dd>
         <dt>공통 조문</dt><dd>${commonStatutes.length ? commonStatutes.map(escapeHtml).join(", ") : "없음"}</dd>
-        <dt>쟁점</dt><dd>${escapeHtml(summarizeText(item.legal_issue_summary, 180))}</dd>
+        <dt>쟁점</dt><dd>${escapeHtml(selectSummaryText(item, 180))}</dd>
         <dt>사실관계</dt><dd>${escapeHtml(extractFactBasis(item, 190))}</dd>
         <dt>판단 사유</dt><dd>${escapeHtml(extractDecisionBasis(item, 190))}</dd>
         ${outcomeRow}
@@ -369,7 +509,7 @@ function renderCompareSummary(base, comparisons) {
   const rows = comparisons
     .filter((item) => item.id !== base.id)
     .map((item) => {
-      const commonStatutes = (base.referenced_statutes || []).filter((statute) => (item.referenced_statutes || []).includes(statute));
+      const commonStatutes = getCommonStatutes(base.referenced_statutes || [], item.referenced_statutes || []);
       return `
         <tr>
           <td><a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.case_no)}</a></td>
@@ -410,7 +550,7 @@ function renderComparisonEvidence(base, comparisons) {
   const evidenceCards = comparisons
     .filter((item) => item.id !== base.id)
     .map((item) => {
-      const commonStatutes = (base.referenced_statutes || []).filter((statute) => (item.referenced_statutes || []).includes(statute));
+      const commonStatutes = getCommonStatutes(base.referenced_statutes || [], item.referenced_statutes || []);
       const basisRows = [
         ["공통 조문", commonStatutes.length ? commonStatutes.join(", ") : "공통 조문 없음"],
         ["기준 사실관계", extractFactBasis(base, 210)],
@@ -449,17 +589,68 @@ function renderComparisonEvidence(base, comparisons) {
   `;
 }
 
+function getResultModeConfig(response = state.searchResponse) {
+  const type = response?.detected_query_type || state.queryType || "natural";
+  return resultModeConfigs[type] || resultModeConfigs.natural;
+}
+
+function getGroupLabel(group, config = getResultModeConfig()) {
+  return config.groupLabels?.[group] || groupLabels[group] || group;
+}
+
+function getGroupDescription(group, config = getResultModeConfig()) {
+  return config.groupDescriptions?.[group] || groupDescriptions[group] || "";
+}
+
+function getResultSummaryValue(response, config = getResultModeConfig(response)) {
+  if (response.detected_query_type === "statute") {
+    return getSelectedBaseStatute(response) || response.related_statutes?.[0] || response.query;
+  }
+  if (response.detected_query_type === "case_no") {
+    return response.base_precedent?.case_no || response.query;
+  }
+  return queryTypeLabels[response.detected_query_type] || response.detected_query_type || config.summaryLabel;
+}
+
+function syncSelectedBaseStatute(response) {
+  if (response.detected_query_type !== "statute") {
+    state.selectedBaseStatute = null;
+    return;
+  }
+
+  const statutes = response.related_statutes || [];
+  if (!statutes.length) {
+    state.selectedBaseStatute = null;
+    return;
+  }
+
+  if (!state.selectedBaseStatute || !statutes.includes(state.selectedBaseStatute)) {
+    state.selectedBaseStatute = statutes[0];
+  }
+}
+
+function getSelectedBaseStatute(response = state.searchResponse) {
+  if (response?.detected_query_type !== "statute") return null;
+  const statutes = response.related_statutes || [];
+  return statutes.includes(state.selectedBaseStatute) ? state.selectedBaseStatute : statutes[0] || null;
+}
+
 function buildInputCaseBase() {
   const response = state.searchResponse;
   if (!response) return null;
+  const config = getResultModeConfig(response);
+  const selectedStatute = getSelectedBaseStatute(response);
+  const isStatuteSearch = response.detected_query_type === "statute";
   return {
     id: "__input_case__",
-    case_no: "입력 사건",
-    case_name: summarizeText(response.query, 120),
-    referenced_statutes: response.related_statutes || [],
+    case_no: isStatuteSearch ? "기준 조문" : config.compareBaseTitle,
+    case_name: isStatuteSearch ? selectedStatute || summarizeText(response.query, 120) : summarizeText(response.query, 120),
+    referenced_statutes: selectedStatute ? [selectedStatute] : response.related_statutes || [],
     legal_issue_summary: response.query,
     fact_summary: response.query,
-    decision_point: "입력 사건은 법원의 판단 사유가 없는 사용자 설명입니다. 후보 판례의 판단 사유와 대조해 검토하세요.",
+    decision_point: isStatuteSearch
+      ? "사용자가 선택한 기준 조문입니다. 비교 판례의 참조 조문과 판단 요지를 대조하세요."
+      : "입력 사건은 법원의 판단 사유가 없는 사용자 설명입니다. 후보 판례의 판단 사유와 대조해 검토하세요.",
     outcome_label: "",
     source_url: "",
     isInputCase: true,
@@ -472,7 +663,7 @@ function renderCompactMeta(item) {
   return `
     <dl class="meta-list">
       <dt>참조 조문</dt><dd>${(item.referenced_statutes || []).map(escapeHtml).join(", ") || "없음"}</dd>
-      <dt>판단 사유</dt><dd>${escapeHtml(summarizeText(item.decision_point, 150))}</dd>
+      <dt>판단 사유</dt><dd>${escapeHtml(extractDecisionBasis(item, 90))}</dd>
       ${outcomeRow}
     </dl>
   `;
@@ -504,17 +695,31 @@ function summarizeText(value, maxLength = 160) {
   return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
 }
 
+function selectSummaryText(item, maxLength = 160) {
+  const candidates = [
+    item?.legal_issue_summary,
+    item?.decision_point,
+    item?.fact_summary,
+    item?.case_name,
+  ].map(cleanText);
+  const preferred = candidates.find((text) => !isWeakSummaryText(text));
+  const fallback = candidates.find((text) => text && text !== "요약 없음") || "공식 원문 확인 필요";
+  return excerptText(preferred || fallback, maxLength);
+}
+
 function extractFactBasis(item, maxLength = 190) {
   const factText = cleanText(item?.fact_summary);
   const issueText = cleanText(item?.legal_issue_summary);
-  const source = isWeakFactText(factText) && issueText !== "요약 없음" ? issueText : factText;
+  const decisionText = cleanText(item?.decision_point);
+  const source = [factText, issueText, decisionText].find((text) => !isWeakFactText(text)) || issueText || factText;
   return excerptText(source, maxLength);
 }
 
 function extractDecisionBasis(item, maxLength = 190) {
   const decisionText = cleanText(item?.decision_point ?? item);
   const issueText = cleanText(item?.legal_issue_summary);
-  const source = isWeakDecisionText(decisionText) && issueText !== "요약 없음" ? issueText : decisionText;
+  const factText = cleanText(item?.fact_summary);
+  const source = [decisionText, issueText, factText].find((text) => !isWeakDecisionText(text)) || issueText || decisionText;
   return excerptText(source, maxLength);
 }
 
@@ -544,16 +749,29 @@ function excerptText(value, maxLength = 190) {
 }
 
 function isWeakFactText(text) {
-  if (!text || text === "요약 없음") return true;
+  if (isWeakSummaryText(text)) return true;
   const proceduralSignals = ["【원 고】", "【피 고】", "소송대리인", "【주 문】", "【변론종결】", "【원심판결】"];
   return proceduralSignals.some((signal) => text.includes(signal)) && !/(계약|매수|임대|소유|지급|손해|근무|임금|보증금|공사|분양)/.test(text.slice(0, 220));
 }
 
 function isWeakDecisionText(text) {
-  if (!text || text === "요약 없음") return true;
-  if (text.length < 60) return true;
+  if (isWeakSummaryText(text)) return true;
+  if (text.length < 60 && !hasLegalSignal(text)) return true;
   if (/^\[?\d+\]?\s*[^가-힣A-Za-z]*[^.。！？]{0,40}\d{4}\.\s*\d{1,2}\.?$/.test(text)) return true;
   return false;
+}
+
+function isWeakSummaryText(text) {
+  if (!text || text === "요약 없음") return true;
+  const normalized = String(text).trim();
+  const proceduralOnly = /^(【[^】]+】\s*){2,}/.test(normalized);
+  const startsWithProcedure = /^【(원\s*고|피\s*고|상고인|피상고인|원심판결|제1심판결|변론종결|주\s*문|청구취지|이유)】/.test(normalized);
+  const hasEarlyIssueSignal = /(여부|요건|효력|대항력|의무|책임|손해|보증금|임대차|계약|채권|상속|배당|증명책임)/.test(normalized.slice(0, 260));
+  return (proceduralOnly || startsWithProcedure) && !hasEarlyIssueSignal;
+}
+
+function hasLegalSignal(text) {
+  return /(여부|요건|효력|대항력|의무|책임|손해|보증금|임대차|계약|채권|상속|배당|증명책임|제\d+조)/.test(String(text ?? ""));
 }
 
 function cleanText(value) {
@@ -568,6 +786,8 @@ function cleanText(value) {
   ];
   let text = String(value ?? "").replace(/\s+/g, " ").trim();
   text = text.replace(/판례\s*>\s*[^|]+?\|\s*/g, "");
+  text = text.replace(/^(?:【(?:원\s*고|피\s*고|상고인|피상고인|원심판결|제1심판결|변론종결|청구취지|주\s*문)】[^【]*)+/g, "");
+  text = text.replace(/【(?:원\s*고|피\s*고|상고인|피상고인|원심판결|제1심판결|변론종결|청구취지)】[^【]*/g, " ");
   boilerplate.forEach((phrase) => {
     text = text.replaceAll(phrase, "");
   });
@@ -581,6 +801,15 @@ function formatOutcomeLabel(value) {
     return "";
   }
   return label;
+}
+
+function getCommonStatutes(baseStatutes, targetStatutes) {
+  const targetKeys = new Set(targetStatutes.map(normalizeStatuteKey));
+  return baseStatutes.filter((statute) => targetKeys.has(normalizeStatuteKey(statute)));
+}
+
+function normalizeStatuteKey(value) {
+  return String(value ?? "").replace(/\s+/g, "").trim();
 }
 
 function buildSearchQueryFromMessages() {
@@ -601,6 +830,25 @@ async function postJson(path, payload) {
 
 function flattenResults(results) {
   return Object.values(results || {}).flat();
+}
+
+function showSearchLoading(message) {
+  const config = getResultModeConfig({ detected_query_type: state.queryType });
+  document.querySelector("#results-title").textContent = message;
+  detectedTypeEl.textContent = queryTypeLabels[state.queryType] || state.queryType;
+  const summaryLabels = document.querySelectorAll(".result-summary .meta-label");
+  if (summaryLabels[0]) summaryLabels[0].textContent = config.summaryLabel;
+  if (summaryLabels[1]) summaryLabels[1].textContent = config.relatedLabel;
+  statutesEl.innerHTML = "<span>검색 중</span>";
+  baseCaseEl.classList.add("hidden");
+  baseCaseEl.innerHTML = "";
+  resultsEl.innerHTML = `
+    <section class="result-empty-state loading-state" aria-live="polite" aria-busy="true">
+      <h3>${escapeHtml(message)}</h3>
+      <p>관련 판례와 비교 후보를 불러오고 있습니다.</p>
+    </section>
+  `;
+  showView("results");
 }
 
 function setLoading(message) {

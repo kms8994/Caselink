@@ -30,6 +30,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -185,6 +186,7 @@ h3 {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -202,6 +204,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px rgba(15, 107, 98, 0.13);
@@ -433,6 +436,27 @@ button:hover,
   margin-bottom: 16px;
 }
 
+.base-statute-control {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 16px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.base-statute-control select {
+  min-height: 42px;
+  padding: 0 12px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.base-statute-note {
+  margin: 10px 0 16px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .result-sections {
   display: grid;
   gap: 14px;
@@ -459,6 +483,31 @@ button:hover,
   margin: 0;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.loading-state {
+  position: relative;
+  padding-left: 70px;
+}
+
+.loading-state::before {
+  content: "";
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  border: 3px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .result-section {
@@ -508,6 +557,32 @@ button:hover,
 .case-name {
   color: var(--muted);
   line-height: 1.6;
+}
+
+.comparison-points {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(21, 96, 130, 0.07);
+}
+
+.comparison-points div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.comparison-points dt {
+  font-size: 0.78rem;
+}
+
+.comparison-points dd {
+  color: var(--ink);
+  font-size: 0.92rem;
 }
 
 .case-topline {
@@ -698,6 +773,11 @@ tr:last-child td {
 
   .method-options {
     display: flex;
+  }
+
+  .comparison-points div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
   .base-case {
